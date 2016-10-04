@@ -77,7 +77,13 @@ trap(struct trapframe *tf)
             cpunum(), tf->cs, tf->eip);
     lapiceoi();
     break;
-
+  case T_DIVIDE: 
+    if (proc->signal_handlers[SIGFPE] != 0){
+        signal_deliver(SIGFPE);
+    }
+    cprintf("pid %d %s: no signal handler was provided for SIG_FPE=%d", 
+            proc->pid, proc->name, SIGFPE);
+    panic("trap");
   //PAGEBREAK: 13
   default:
     if(proc == 0 || (tf->cs&3) == 0){

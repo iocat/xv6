@@ -502,5 +502,27 @@ void signal_deliver(int signum)
 // registers (eax, ecx, edx).
 void signal_return(void)
 {
-
+    /*
+ *  Stack frame before signal handling:
+ *  - esp before exception   <- higher address
+ *  ------------------------ <- saved context
+ *  - saved eip
+ *  - saved eax
+ *  - saved ecx
+ *  - saved edx
+ *  ------------------------ <- frame for registered signal handler
+ *  - signum
+ *  - signal trampoline  <- proc->esp's here when signal_return is invoked (kernel stack)
+ *  ------------------------
+ *  After signal handler is executed the return instruction is the signal trampoline, 
+ *  the trampoline will then invoke another syscall:
+ *  trampoline (process stack) -> sigreturn syscall (kernel stack) 
+ *  -> signal_return (kernel stack)
+ * */
+    uint* edx = (uint*)  (proc->tf->esp - 2 * sizeof (uint)); // find where edx is
+    proc->tf->edx = edx[0];   /* recover */
+    proc->tf->ecx = edx[1]; /* the registers */
+    proc->tf->eax = edx[2]; 
+    proc->tf->eip = edx[3]; /* move eip to the fault instruction */
+    proc->tf->esp = edx[4]; /* recover the stack pointer */ 
 }
