@@ -81,7 +81,7 @@ trap(struct trapframe *tf)
     if (proc->signal_handlers[SIGFPE] != 0){
         signal_deliver(SIGFPE);
     }
-    cprintf("pid %d %s: no signal handler was provided for SIG_FPE=%d", 
+    cprintf("pid %d %s: no signal handler was provided for SIGFPE=%d", 
             proc->pid, proc->name, SIGFPE);
     panic("trap");
   //PAGEBREAK: 13

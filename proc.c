@@ -519,7 +519,7 @@ void signal_return(void)
  *  trampoline (process stack) -> sigreturn syscall (kernel stack) 
  *  -> signal_return (kernel stack)
  * */
-    uint* edx = (uint*)  (proc->tf->esp - 2 * sizeof (uint)); // find where edx is
+    uint* edx = (uint*)  (proc->tf->esp + 2 * sizeof (uint)); // find where edx is
     proc->tf->edx = edx[0];   /* recover */
     proc->tf->ecx = edx[1]; /* the registers */
     proc->tf->eax = edx[2]; 
