@@ -524,5 +524,5 @@ void signal_return(void)
     proc->tf->ecx = edx[1]; /* the registers */
     proc->tf->eax = edx[2]; 
     proc->tf->eip = edx[3]; /* move eip to the fault instruction */
-    proc->tf->esp = edx + 4; /* recover the stack pointer */ 
+    proc->tf->esp = (uint) edx + 4; /* recover the stack pointer */ 
 }
