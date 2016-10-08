@@ -80,10 +80,12 @@ trap(struct trapframe *tf)
   case T_DIVIDE: 
     if (proc->signal_handlers[SIGFPE] != 0){
         signal_deliver(SIGFPE);
-    }
-    cprintf("pid %d %s: no signal handler was provided for SIGFPE=%d", 
+    }else{
+        cprintf("pid %d %s: no signal handler was provided for SIGFPE=%d", 
             proc->pid, proc->name, SIGFPE);
-    panic("trap");
+        panic("trap");
+    }
+    break;
   //PAGEBREAK: 13
   default:
     if(proc == 0 || (tf->cs&3) == 0){
