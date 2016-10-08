@@ -495,7 +495,14 @@ sighandler_t signal_register_handler(int signum, sighandler_t handler, void *tra
 // the volatile registers (eax, ecx, edx) on the stack.
 void signal_deliver(int signum)
 {
-
+  int *add = (int*) proc->tf->esp;
+  *(add-4) = proc->tf->eip;
+  *(add-8) = proc->tf->eax;
+  *(add-12) = proc->tf->ecx;
+  *(add-16) = proc->tf->edx;
+  *(add-20) = signum;
+  *(add-24) = (int) proc->signal_trampoline;
+  proc->tf->esp = proc->tf->esp - 24;
 }
 
 // This function must clean up the signal frame from the stack and restore the volatile
