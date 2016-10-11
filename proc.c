@@ -495,13 +495,14 @@ sighandler_t signal_register_handler(int signum, sighandler_t handler, void *tra
 // the volatile registers (eax, ecx, edx) on the stack.
 void signal_deliver(int signum)
 {
-  int *add = (int*) proc->tf->esp;
-  *(add-4) = proc->tf->eip;
-  *(add-8) = proc->tf->eax;
-  *(add-12) = proc->tf->ecx;
-  *(add-16) = proc->tf->edx;
-  *(add-20) = signum;
-  *(add-24) = (int) proc->signal_trampoline;
+  uint *add = (uint*) proc->tf->esp;
+  *(add-1) = proc->tf->eip;
+  *(add-2) = proc->tf->eax;
+  *(add-3) = proc->tf->ecx;
+  *(add-4) = proc->tf->edx;
+  *(add-5) = signum;
+  *(add-6) = (int) proc->signal_trampoline;
+  proc->tf->eip = (uint)proc->signal_handlers[signum];
   proc->tf->esp = proc->tf->esp - 24;
 }
 
