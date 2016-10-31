@@ -119,6 +119,11 @@ int             wait(void);
 void            wakeup(void*);
 void            yield(void);
 
+// thread.c
+int             clone(void * (*)(void *), void *, void *);
+int             join(int, void **, void **);
+void            texit(void *);
+
 // swtch.S
 void            swtch(struct context**, struct context*);
 
