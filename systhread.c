@@ -10,18 +10,36 @@
 
 int
 sys_clone(void){
-    // TODO
-    return -1;
+    int func;
+    int arg;
+    int stack;
+    if (argint(0, &func) < 0 \
+        || argint(1, &arg) < 0 \
+        || argint(2, &stack) < 0){
+        return -1;
+    }
+    return clone(func, arg, stack);
 }
 
 int
 sys_join(void){
-    // TODO
-    return -1;
+    int pid;
+    int stack;
+    int retval;
+    if(argint(0, &pid) < 0 \
+        || argint(1, &stack) < 0 \
+        || argint(2, &retval) < 0) {
+        return -1;
+    }
+    return join(pid, stack, retval);
 }
 
 int
 sys_texit(void){
-    // TODO
-    return -1;
+    int retval;
+    if (argint(0, &retval) < 0){
+        return -1;
+    }
+    texit(retval);
+    return 0;
 }
