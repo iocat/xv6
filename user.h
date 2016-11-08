@@ -27,6 +27,10 @@ int halt(void);
 int clone(void * (*)(void *), void *, void *);
 int join(int, void **, void **);
 void texit(void *);
+int sem_init(int, int);
+int sem_destroy(int);
+int sem_wait(int);
+int sem_signal(int);
 
 
 // ulib.c

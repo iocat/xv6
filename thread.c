@@ -9,15 +9,15 @@
 #include "mmu.h"
 #include "proc.h"
 
-void thread_init(struct* proc np) {
+void thread_init(struct* proc np, void* stack) {
     np->athread = 1; // mark as a thread
     np->tstack = stack; // save the stack address
     np->pgdir = proc->pgdir; // share address space
     np->sz = proc->sz; // same program size
     np->parent = proc;
     np->killed = 0;
-    np->file = proc->file; // share same files ??
-    np->cwd = proc->cwd; // share cwd ??
+    np->file = proc->file; // NOTE: share same files ??
+    np->cwd = proc->cwd; // NOTE: share cwd ??
     safestrcpy(proc->name, np->name, sizeof(np->name));
 }
 
@@ -34,7 +34,7 @@ clone(void *(*func) (void *), void *arg, void *stack){
         return -1; /* cannot allocate a new process */
     }
     // initialize the user thread
-    thread_init(np);
+    thread_init(np, stack);
 
     // Set up the user thread's stack
     np->tf->esp = (uint) stack + PGSIZE - 2*sizeof(int);
@@ -118,4 +118,63 @@ texit(void *retval){
     proc->state = ZOMBIE;
     sched();
     panic("zombie attacks!");
+}
+
+
+struct semaphore[NSEM] semtable; /* the list of semaphore */
+
+int sem_init(int semId, int n){
+    if (semId < 0 ||  semId >= NSEM){
+        return -1; /* semaphore's id out of range */
+    }
+    if (n < 0) {
+        return -1; /* improper initial value of semaphore */
+    }
+    struct semaphore* sem = semtable[semId];
+    acquire(&sem->lock);
+    if (sem->active == 1){
+        return -1; /* semaphore is already activated */
+    }
+    sem->active = 1;
+    sem->value = n;
+    release(&sem->lock);
+    return 0;
+}
+
+
+int sem_destroy(int semId){
+    if (semId < 0 ||  semId >= NSEM){
+        return -1; /* semaphore's id out of range */
+    }
+    struct semaphore* sem = semtable[semId];
+    sem->active = 0; // NOTE: atomic??? no sem lock
+    return 0;
+}
+
+
+int sem_wait(int semId){
+    if (semId < 0 ||  semId >= NSEM){
+        return -1; /* semaphore's id out of range */
+    }
+    struct semaphore* sem = semtable[semId];
+    acquire(&sem->lock);
+    while (sem->value == 0){ /* keep sleeping until someone increments the sem */
+        sleep(semId, &sem->lock);
+    }
+    sem->value--;
+    release(&sem->lock);
+    return 0;
+}
+
+
+int sem_signal(int semId){
+    if (semId < 0 ||  semId >= NSEM){
+        return -1; /* semaphore's id is out of range */
+    }
+    struct semaphore* sem = semtable[semId];
+    acquire(&sem->lock);
+    sem->value++; /* increment the semaphore */
+    wakeup(semId);  /* wake up sleeping processes, if there are any */
+    release(&sem->lock);
+    return 0;
 }
