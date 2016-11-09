@@ -119,11 +119,11 @@ void            userinit(void);
 int             wait(void);
 void            wakeup(void*);
 void            yield(void);
-
-// thread.c
 int             clone(void * (*)(void *), void *, void *);
 int             join(int, void **, void **);
 void            texit(void *);
+
+// semaphore.c
 int             sem_init(int, int);
 int             sem_destroy(int);
 int             sem_wait(int);

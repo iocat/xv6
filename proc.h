@@ -54,8 +54,8 @@ enum procstate { UNUSED, EMBRYO, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
 // Per-process state
 struct proc {
   int athread;                 // If non-zero, this process is a thread
-  void* tretval;               // The return value of this thread
-  void* tstack;                // Bottom of this thread stack 
+  void* tretval;               // The return value of the thread
+  void* tstack;                // Bottom of the thread stack
   uint sz;                     // Size of process memory (bytes)
   pde_t* pgdir;                // Page table
   char *kstack;                // Bottom of kernel stack for this process
