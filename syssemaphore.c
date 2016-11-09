@@ -6,7 +6,7 @@
 #include "memlayout.h"
 #include "mmu.h"
 #include "proc.h"
-#include "thread.h"
+#include "semaphore.h"
 
 int sys_sem_init(void){
     int semId;

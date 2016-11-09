@@ -175,7 +175,7 @@ UPROGS=\
 	_wc\
 	_zombie\
 	_shutdown\
-	#_sem_test\
+	_sem_test\
 	#_thread_test\
 
 fs.img: mkfs README $(UPROGS)

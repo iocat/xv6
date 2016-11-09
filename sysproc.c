@@ -102,3 +102,40 @@ sys_halt(void)
     outw(0xB004, 0x2000);
   return 0;
 }
+
+
+int
+sys_clone(void){
+    int func;
+    int arg;
+    int stack;
+    if (argint(0, &func) < 0 \
+        || argint(1, &arg) < 0 \
+        || argint(2, &stack) < 0){
+        return -1;
+    }
+    return clone((void * (*)(void *))func, (void*)arg,(void*) stack);
+}
+
+int
+sys_join(void){
+    int pid;
+    int stack;
+    int retval;
+    if(argint(0, &pid) < 0 \
+        || argint(1, &stack) < 0 \
+        || argint(2, &retval) < 0) {
+        return -1;
+    }
+    return join(pid, (void**)stack, (void**) retval);
+}
+
+int
+sys_texit(void){
+    int retval;
+    if (argint(0, &retval) < 0){
+        return -1;
+    }
+    texit((void*)retval);
+    return 0;
+}

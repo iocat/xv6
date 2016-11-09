@@ -2,7 +2,7 @@
 #include "defs.h"
 #include "param.h"
 #include "fs.h"
-#include "thread.h"
+#include "semaphore.h"
 #include "x86.h"
 #include "date.h"
 #include "mmu.h"
