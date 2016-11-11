@@ -69,7 +69,7 @@ found:
   p->context = (struct context*)sp;
   memset(p->context, 0, sizeof *p->context);
   p->context->eip = (uint)forkret;
-
+  p->athread = 0;
   return p;
 }
 
@@ -483,9 +483,9 @@ int
 clone(void *(*func) (void *), void *arg, void *stack){
     struct proc* np = 0;
     // stack check
-    if ((uint) stack % PGSIZE != 0) {
-        return -1; /* user's stack is not aligned properly as a page */
-    }
+    //if ((uint) stack % PGSIZE != 0) {
+      //  return -1; /* user's stack is not aligned properly as a page */
+    //}
 
     if((np = allocproc())== 0 ){
         return -1; /* cannot allocate a new process */
@@ -493,9 +493,12 @@ clone(void *(*func) (void *), void *arg, void *stack){
     // initialize the user thread
     thread_init(np, stack);
 
+    // initialize the trap frame
+    *np->tf = *proc->tf; 
+
     // Set up the user thread's stack
-    np->tf->esp = (uint) stack + PGSIZE - 2*sizeof(int);
-    ((uint*) np->tf->esp)[0] = 0xFFFFFFFF; /* return address */
+    np->tf->esp = ((uint) stack) + PGSIZE - 8;
+    ((uint*) np->tf->esp)[0] = 0x00000000; /* return address */
     ((uint*) np->tf->esp)[1] = (uint) arg; /* set up arg for func */
     np->tf->eip = (uint) func; /* thread starts at func */
 
@@ -509,46 +512,40 @@ clone(void *(*func) (void *), void *arg, void *stack){
 // waits for a particular child thread to finishes its execution
 int
 join(int pid, void **stack, void **retval){
-    for (;;){
-        int hasChild = 0;
-        struct proc* child;
-        acquire(&ptable.lock);
-        int i;
-        for ( i = 0; i < NPROC; i ++) {
-            if (ptable.proc[i].parent == proc && \
-                ptable.proc[i].pid == pid){
-                child = &ptable.proc[i];
-                hasChild = 1;
-                break;
-            }
-        }
-        if (hasChild == 0){ /* error: no child with pid is found */
-            release(&ptable.lock);
-            return -1;
-        }else if (child->state == ZOMBIE){
-            *retval = child->tretval;
-            *stack = child->tstack;
-            // Funeral here, cough, clean up here
-            child->athread = 0;
-            child->tretval = 0;
-            child->tstack = 0;
-            child->sz = 0;
-            child->pgdir = 0;
-            kfree(child->kstack);
-            child->kstack = 0;
-            child->state = UNUSED;
-            child->parent = 0;
-            child->killed = 0;
-            // child->ofile = 0;
-            // child->cwd = 0;
-            child->name[0] = 0;
-            release(&ptable.lock);
-            return 0;
-        }else{ // child did not texit()
-            sleep((void*)proc->pid, &ptable.lock);
-            // wake up, go find the zombie children
+    struct proc* child;
+    int hasChild = 0;
+    acquire(&ptable.lock);
+    for (child = &ptable.proc[0]; child < &ptable.proc[NPROC]; child++) {
+        if (child->parent == proc && child->pid == pid){
+            hasChild = 1;
+            break;
         }
     }
+    if (hasChild == 0){ /* error: no child with pid is found */
+        release(&ptable.lock);
+        return -1;
+    }
+    while(child->state != ZOMBIE) {
+        sleep((void*)pid, &ptable.lock);
+    }
+
+    *retval = child->tretval;
+    *stack = child->tstack;
+    // Funeral here, cough, clean up here
+    child->athread = 0;
+    child->tretval = 0;
+    child->tstack = 0;
+    child->sz = 0;
+    child->pgdir = 0;
+    kfree(child->kstack);
+    child->kstack = 0;
+    child->state = UNUSED;
+    child->parent = 0;
+    child->killed = 0;
+    // child->ofile = 0;
+    // child->cwd = 0;
+    child->name[0] = 0;
+    release(&ptable.lock);
     return 0;
 }
 
@@ -561,7 +558,7 @@ texit(void *retval){
     }
     proc->tretval = retval;
     acquire(&ptable.lock);
-    wakeup1(proc->parent);
+    wakeup1((void*)proc->pid);
     // Pass abandoned children of this thread to init.
     struct proc* p;
     for( p = ptable.proc; p < &ptable.proc[NPROC]; p++){
