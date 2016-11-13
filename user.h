@@ -31,7 +31,8 @@ int sem_init(int, int);
 int sem_destroy(int);
 int sem_wait(int);
 int sem_signal(int);
-
+int sigregister(int, void(*)(int), void(*)(void));
+int sigreturn(void);
 
 // ulib.c
 int stat(char*, struct stat*);
@@ -46,3 +47,5 @@ void* memset(void*, int, uint);
 void* malloc(uint);
 void free(void*);
 int atoi(const char*);
+int signal(int, void(*)(int));
+void sigtrampoline(void);

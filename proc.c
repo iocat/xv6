@@ -31,23 +31,21 @@ pinit(void)
 // If found, change state to EMBRYO and initialize
 // state required to run in the kernel.
 // Otherwise return 0.
+// Must hold ptable.lock.
 static struct proc*
 allocproc(void)
 {
   struct proc *p;
   char *sp;
 
-  acquire(&ptable.lock);
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
     if(p->state == UNUSED)
       goto found;
-  release(&ptable.lock);
   return 0;
 
 found:
   p->state = EMBRYO;
   p->pid = nextpid++;
-  release(&ptable.lock);
 
   // Allocate kernel stack.
   if((p->kstack = kalloc()) == 0){
@@ -55,11 +53,11 @@ found:
     return 0;
   }
   sp = p->kstack + KSTACKSIZE;
-  
+
   // Leave room for trap frame.
   sp -= sizeof *p->tf;
   p->tf = (struct trapframe*)sp;
-  
+
   // Set up new context to start executing at forkret,
   // which returns to trapret.
   sp -= 4;
@@ -80,7 +78,9 @@ userinit(void)
 {
   struct proc *p;
   extern char _binary_initcode_start[], _binary_initcode_size[];
-  
+
+  acquire(&ptable.lock);
+
   p = allocproc();
   initproc = p;
   if((p->pgdir = setupkvm()) == 0)
@@ -100,6 +100,8 @@ userinit(void)
   p->cwd = namei("/");
 
   p->state = RUNNABLE;
+
+  release(&ptable.lock);
 }
 
 // Grow current process's memory by n bytes.
@@ -108,7 +110,7 @@ int
 growproc(int n)
 {
   uint sz;
-  
+
   sz = proc->sz;
   if(n > 0){
     if((sz = allocuvm(proc->pgdir, sz, sz + n)) == 0)
@@ -131,15 +133,20 @@ fork(void)
   int i, pid;
   struct proc *np;
 
+  acquire(&ptable.lock);
+
   // Allocate process.
-  if((np = allocproc()) == 0)
+  if((np = allocproc()) == 0){
+    release(&ptable.lock);
     return -1;
+  }
 
   // Copy process state from p.
   if((np->pgdir = copyuvm(proc->pgdir, proc->sz)) == 0){
     kfree(np->kstack);
     np->kstack = 0;
     np->state = UNUSED;
+    release(&ptable.lock);
     return -1;
   }
   np->sz = proc->sz;
@@ -155,14 +162,13 @@ fork(void)
   np->cwd = idup(proc->cwd);
 
   safestrcpy(np->name, proc->name, sizeof(proc->name));
- 
+
   pid = np->pid;
 
-  // lock to force the compiler to emit the np->state write last.
-  acquire(&ptable.lock);
   np->state = RUNNABLE;
+
   release(&ptable.lock);
-  
+
   return pid;
 }
 
@@ -233,11 +239,11 @@ wait(void)
         kfree(p->kstack);
         p->kstack = 0;
         freevm(p->pgdir);
-        p->state = UNUSED;
         p->pid = 0;
         p->parent = 0;
         p->name[0] = 0;
         p->killed = 0;
+        p->state = UNUSED;
         release(&ptable.lock);
         return pid;
       }
@@ -283,7 +289,7 @@ scheduler(void)
       proc = p;
       switchuvm(p);
       p->state = RUNNING;
-      swtch(&cpu->scheduler, proc->context);
+      swtch(&cpu->scheduler, p->context);
       switchkvm();
 
       // Process is done running for now.
@@ -296,7 +302,12 @@ scheduler(void)
 }
 
 // Enter scheduler.  Must hold only ptable.lock
-// and have changed proc->state.
+// and have changed proc->state. Saves and restores
+// intena because intena is a property of this
+// kernel thread, not this CPU. It should
+// be proc->intena and proc->ncli, but that would
+// break in the few places where a lock is held but
+// there's no process.
 void
 sched(void)
 {
@@ -336,12 +347,13 @@ forkret(void)
 
   if (first) {
     // Some initialization functions must be run in the context
-    // of a regular process (e.g., they call sleep), and thus cannot 
+    // of a regular process (e.g., they call sleep), and thus cannot
     // be run from main().
     first = 0;
-    initlog();
+    iinit(ROOTDEV);
+    initlog(ROOTDEV);
   }
-  
+
   // Return to "caller", actually trapret (see allocproc).
 }
 
@@ -446,7 +458,7 @@ procdump(void)
   struct proc *p;
   char *state;
   uint pc[10];
-  
+
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
     if(p->state == UNUSED)
       continue;
@@ -463,7 +475,6 @@ procdump(void)
     cprintf("\n");
   }
 }
-
 
 void thread_init(struct proc* np, void* stack) {
     np->athread = 1; // mark as a thread
@@ -576,3 +587,61 @@ texit(void *retval){
     panic("zombie attacks!");
 }
 
+// This function saves the pointer to the user's signal handler (as well as the signal
+// trampoline) in the proc struct.
+sighandler_t signal_register_handler(int signum, sighandler_t handler, void *trampoline)
+{
+  if (!proc)
+    return (sighandler_t) -1;
+
+  sighandler_t previous = proc->signal_handlers[signum];
+
+  proc->signal_handlers[signum] = handler;
+  proc->signal_trampoline = trampoline;
+
+  return previous;
+}
+
+// This function must add the signal frame to the process stack, including saving
+// the volatile registers (eax, ecx, edx) on the stack.
+void signal_deliver(int signum)
+{
+  uint *add = (uint*) proc->tf->esp;
+  *(add-1) = proc->tf->eip;
+  *(add-2) = proc->tf->eax;
+  *(add-3) = proc->tf->ecx;
+  *(add-4) = proc->tf->edx;
+  *(add-5) = signum;
+  *(add-6) = (int) proc->signal_trampoline;
+  proc->tf->eip = (uint)proc->signal_handlers[signum];
+  proc->tf->esp = proc->tf->esp - 24;
+}
+
+// This function must clean up the signal frame from the stack and restore the volatile
+// registers (eax, ecx, edx).
+void signal_return(void)
+{
+    /*
+ *  Stack frame before signal handling:
+ *  - esp before exception   <- higher address
+ *  ------------------------ <- saved context
+ *  - saved eip
+ *  - saved eax
+ *  - saved ecx
+ *  - saved edx
+ *  ------------------------ <- frame for registered signal handler
+ *  - signum
+ *  - signal trampoline  <- proc->esp's here when signal_return is invoked (kernel stack)
+ *  ------------------------
+ *  After signal handler is executed the return instruction is the signal trampoline, 
+ *  the trampoline will then invoke another syscall:
+ *  trampoline (process stack) -> sigreturn syscall (kernel stack) 
+ *  -> signal_return (kernel stack)
+ * */
+    uint* edx = (uint*)  (proc->tf->esp + 2 * sizeof (uint)); // find where edx is
+    proc->tf->edx = edx[0];   /* recover */
+    proc->tf->ecx = edx[1]; /* the registers */
+    proc->tf->eax = edx[2]; 
+    proc->tf->eip = edx[3]; /* move eip to the fault instruction */
+    proc->tf->esp = proc->tf->esp + 24; /* recover the stack pointer */ 
+}

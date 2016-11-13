@@ -1,9 +1,8 @@
-// Segments in proc->gdt.
-#define NSEGS     7
+#include "signal.h"
 
 // Per-CPU state
 struct cpu {
-  uchar id;                    // Local APIC ID; index into cpus[] below
+  uchar apicid;                // Local APIC ID
   struct context *scheduler;   // swtch() here to enter scheduler
   struct taskstate ts;         // Used by x86 to find stack for interrupt
   struct segdesc gdt[NSEGS];   // x86 global descriptor table
@@ -69,6 +68,9 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+
+  sighandler_t signal_handlers[2];
+  void *signal_trampoline;
 };
 
 // Process memory is laid out contiguously, low addresses first:
@@ -76,3 +78,8 @@ struct proc {
 //   original data and bss
 //   fixed-size stack
 //   expandable heap
+
+
+void signal_deliver(int signum);
+void signal_return(void);
+sighandler_t signal_register_handler(int signum, sighandler_t handler, void *trampoline);
