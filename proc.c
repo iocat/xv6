@@ -507,6 +507,13 @@ clone(void *(*func) (void *), void *arg, void *stack){
     // initialize the trap frame
     *np->tf = *proc->tf; 
 
+    int i;
+    for(i = 0; i < NOFILE; i++)
+        if(proc->ofile[i])
+          np->ofile[i] = filedup(proc->ofile[i]);
+    np->cwd = idup(proc->cwd);
+
+
     // Set up the user thread's stack
     np->tf->esp = ((uint) stack) + PGSIZE - 8;
     ((uint*) np->tf->esp)[0] = 0x00000000; /* return address */
