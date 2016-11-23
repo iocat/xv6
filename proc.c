@@ -494,10 +494,7 @@ int
 clone(void *(*func) (void *), void *arg, void *stack){
     struct proc* np = 0;
     // stack check
-    //if ((uint) stack % PGSIZE != 0) {
-      //  return -1; /* user's stack is not aligned properly as a page */
-    //}
-
+    acquire(&ptable.lock);
     if((np = allocproc())== 0 ){
         return -1; /* cannot allocate a new process */
     }
@@ -521,7 +518,6 @@ clone(void *(*func) (void *), void *arg, void *stack){
     np->tf->eip = (uint) func; /* thread starts at func */
 
     // Allow the user thread to run
-    acquire(&ptable.lock);
     np->state = RUNNABLE;
     release(&ptable.lock);
     return np->pid;
