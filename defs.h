@@ -118,6 +118,8 @@ void            userinit(void);
 int             wait(void);
 void            wakeup(void*);
 void            yield(void);
+int             mprotect(void*, int, int);
+int             cowfork(void);
 
 // swtch.S
 void            swtch(struct context**, struct context*);

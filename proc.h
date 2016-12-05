@@ -68,7 +68,7 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
-  sighandler_t handlers[2];    // Signal handlers
+  sighandler_t handlers[3];    // Signal handlers
   uint restorer_addr;          // Signal restorer
 };
 

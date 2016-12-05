@@ -130,3 +130,21 @@ int sys_signal_restorer(void)
     
     return 0;
 }
+
+int sys_mprotect(void)
+{
+    void* addr;
+    int len;
+    int prot;
+    if(argint(0, (int*) &addr) < 0 ||
+            argint(1, &len) < 0 ||
+            argint(2, &prot) < 0){
+        return -1;
+    }
+    return mprotect(addr, len, prot);
+}
+
+int sys_cowfork(void)
+{
+    return cowfork();
+}

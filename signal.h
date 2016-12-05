@@ -1,9 +1,10 @@
-#ifndef XV6_SIGNAL
-#define XV6_SIGNAL
-
 #define SIGKILL	0
 #define SIGFPE	1
+#define SIGSEGV 2
 
-typedef void (*sighandler_t)(int);
+typedef struct {
+    uint addr;
+    uint type;
+} siginfo_t;
 
-#endif
+typedef void (*sighandler_t)(int, siginfo_t);

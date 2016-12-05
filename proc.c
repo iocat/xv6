@@ -6,6 +6,7 @@
 #include "x86.h"
 #include "proc.h"
 #include "spinlock.h"
+#include "mprotect.h"
 
 struct {
   struct spinlock lock;
@@ -72,6 +73,7 @@ found:
 
   p->handlers[SIGKILL] = (sighandler_t) -1;
   p->handlers[SIGFPE] = (sighandler_t) -1;
+  p->handlers[SIGSEGV] = (sighandler_t) -1;
   p->restorer_addr = -1;
 
   return p;
@@ -470,6 +472,13 @@ procdump(void)
 
 void signal_deliver(int signum)
 {
+    //siginfo_t info;
+    switch (signum){
+    case SIGSEGV:
+        // TODO: get the error info
+        break;
+    }
+    // TODO: push siginfo argument onto the user's stack
 	uint old_eip = proc->tf->eip;
 
 	*((uint*)(proc->tf->esp - 4))  = (uint) old_eip;		// real return address
@@ -484,12 +493,22 @@ void signal_deliver(int signum)
 
 sighandler_t signal_register_handler(int signum, sighandler_t handler)
 {
-	if (!proc)
+	if (!proc){
 		return (sighandler_t) -1;
-
+    }
 	sighandler_t previous = proc->handlers[signum];
-
 	proc->handlers[signum] = handler;
-
 	return previous;
+}
+
+int mprotect(void *addr, int len, int prot)
+{
+    // TODO: implement 
+    return -1;
+}
+
+int cowfork(void)
+{
+    // TODO: implement
+    return -1;
 }
