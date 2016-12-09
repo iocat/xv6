@@ -1,3 +1,4 @@
+#include "types.h"
 #define SIGKILL	0
 #define SIGFPE	1
 #define SIGSEGV 2

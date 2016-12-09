@@ -139,7 +139,7 @@ void*           memmove(void*, const void*, uint);
 void*           memset(void*, int, uint);
 char*           safestrcpy(char*, const char*, int);
 int             strlen(const char*);
-int             strncmp(const char*, const char*, uint);
+int             strncmp(const char*, const char*, int);
 char*           strncpy(char*, const char*, int);
 
 // syscall.c
@@ -180,6 +180,7 @@ void            switchuvm(struct proc*);
 void            switchkvm(void);
 int             copyout(pde_t*, uint, void*, uint);
 void            clearpteu(pde_t *pgdir, char *uva);
+pte_t*          walkpgdir(pde_t*, const void*, int);
 
 // number of elements in fixed-size array
 #define NELEM(x) (sizeof(x)/sizeof((x)[0]))

@@ -470,24 +470,49 @@ procdump(void)
   }
 }
 
+// gets the protection from page table entry
+uint prot_from_pte(pte_t pte){
+    uint prot = PROT_NONE; 
+    if (pte & PTE_U) {
+        prot |= PROT_READ;
+    }
+    if (pte & PTE_W){
+        prot |= PROT_WRITE;
+    }
+    return prot;
+}
+
+// get the page table entry from the protection
+pte_t pte_from_prot(pte_t pte, int prot) {
+    pte &= ~(PTE_U | PTE_W);
+    if (prot & PROT_READ) {
+        pte |= PTE_U;
+    }
+    if( prot & PROT_WRITE){
+        pte |= PTE_W;
+    }
+    return pte;   
+}
+
 void signal_deliver(int signum)
 {
-    //siginfo_t info;
+    siginfo_t info;
     switch (signum){
     case SIGSEGV:
-        // TODO: get the error info
+        info.addr = rcr2();
+        pte_t* pte = walkpgdir(proc->pgdir,(void*) info.addr, 0);
+        info.type = prot_from_pte(*pte);
         break;
     }
-    // TODO: push siginfo argument onto the user's stack
 	uint old_eip = proc->tf->eip;
-
 	*((uint*)(proc->tf->esp - 4))  = (uint) old_eip;		// real return address
 	*((uint*)(proc->tf->esp - 8))  = proc->tf->eax;			// eax
 	*((uint*)(proc->tf->esp - 12)) = proc->tf->ecx;			// ecx
 	*((uint*)(proc->tf->esp - 16)) = proc->tf->edx;			// edx
-	*((uint*)(proc->tf->esp - 20)) = (uint) signum;			// signal number
-	*((uint*)(proc->tf->esp - 24)) = proc->restorer_addr;	// address of restorer
-	proc->tf->esp -= 24;
+    *((siginfo_t*)(proc->tf->esp - 24)) = info;             // signal info
+	*((uint*)(proc->tf->esp - 28)) = (uint) signum;			// signal number
+    *((uint*)(proc->tf->esp - 32)) = proc->restorer_addr;	// address of restorer
+	proc->tf->esp -= 32;
 	proc->tf->eip = (uint) proc->handlers[signum];
 }
 
@@ -503,12 +528,60 @@ sighandler_t signal_register_handler(int signum, sighandler_t handler)
 
 int mprotect(void *addr, int len, int prot)
 {
-    // TODO: implement 
-    return -1;
+    if( (int) addr % PGSIZE != 0){
+        return -1; // cannot protect non page-aligned address
+    }
+    int i = 0;
+    int counter = len / PGSIZE;
+    if (i<=counter){
+        // find pte, allocate if not exists
+        pte_t* pte = walkpgdir(proc->pgdir,(void*)( (int) addr + i*PGSIZE), 1);
+        *pte = pte_from_prot(*pte, prot);
+        i++;
+    }
+    return 0;
 }
 
+// fork with copy on write feature
 int cowfork(void)
 {
-    // TODO: implement
+    // TODO: implement cow fork
+  int i, pid;
+  struct proc *np;
+
+  // Allocate process.
+  if((np = allocproc()) == 0)
     return -1;
+
+  // Copy process state from p.
+  if((np->pgdir = copyuvm(proc->pgdir, proc->sz)) == 0){
+    kfree(np->kstack);
+    np->kstack = 0;
+    np->state = UNUSED;
+    return -1;
+  }
+  np->sz = proc->sz;
+  np->parent = proc;
+  *np->tf = *proc->tf;
+
+  // Clear %eax so that fork returns 0 in the child.
+  np->tf->eax = 0;
+
+  for(i = 0; i < NOFILE; i++)
+    if(proc->ofile[i])
+      np->ofile[i] = filedup(proc->ofile[i]);
+  np->cwd = idup(proc->cwd);
+
+  safestrcpy(np->name, proc->name, sizeof(proc->name));
+ 
+  pid = np->pid;
+
+  // lock to force the compiler to emit the np->state write last.
+  acquire(&ptable.lock);
+  np->state = RUNNABLE;
+  release(&ptable.lock);
+  
+  return pid;
 }
+
+   
