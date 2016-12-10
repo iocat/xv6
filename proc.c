@@ -533,16 +533,22 @@ int mprotect(void *addr, int len, int prot)
     }
     int i = 0;
     int counter = len / PGSIZE;
-    if (i<=counter){
+    do{
         // find pte, allocate if not exists
         pte_t* pte = walkpgdir(proc->pgdir,(void*)( (int) addr + i*PGSIZE), 1);
         *pte = pte_from_prot(*pte, prot);
         i++;
-    }
+    }while(i < counter);
+
     return 0;
 }
 
-// fork with copy on write feature
+static void 
+cow_on_copy_page(int signum, siginfo_t info){
+
+}
+
+// fork with copy on write pages
 int cowfork(void)
 {
     // TODO: implement cow fork
@@ -552,7 +558,7 @@ int cowfork(void)
   // Allocate process.
   if((np = allocproc()) == 0)
     return -1;
-
+  //
   // Copy process state from p.
   if((np->pgdir = copyuvm(proc->pgdir, proc->sz)) == 0){
     kfree(np->kstack);
@@ -560,6 +566,10 @@ int cowfork(void)
     np->state = UNUSED;
     return -1;
   }
+  // copy on write handler
+  np->handlers[SIGSEGV] = cow_on_copy_page;
+  proc->handlers[SIGSEGV] = cow_on_copy_page;
+  
   np->sz = proc->sz;
   np->parent = proc;
   *np->tf = *proc->tf;
