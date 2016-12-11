@@ -55,7 +55,7 @@ int
 argptr(int n, char **pp, int size)
 {
   int i;
-  
+
   if(argint(n, &i) < 0)
     return -1;
   if((uint)i >= proc->sz || (uint)i+size > proc->sz)
@@ -103,6 +103,13 @@ extern int sys_signal_register(void);
 extern int sys_signal_restorer(void);
 extern int sys_mprotect(void);
 extern int sys_cowfork(void);
+extern int sys_clone(void);
+extern int sys_join(void);
+extern int sys_texit(void);
+extern int sys_sem_init(void);
+extern int sys_sem_destroy(void);
+extern int sys_sem_wait(void);
+extern int sys_sem_signal(void);
 
 static int (*syscalls[])(void) = {
 [SYS_fork]              sys_fork,
@@ -131,6 +138,13 @@ static int (*syscalls[])(void) = {
 [SYS_signal_restorer]   sys_signal_restorer,
 [SYS_mprotect]          sys_mprotect,
 [SYS_cowfork]           sys_cowfork,
+[SYS_clone]             sys_clone,
+[SYS_join]              sys_join,
+[SYS_texit]             sys_texit,
+[SYS_sem_init]          sys_sem_init,
+[SYS_sem_destroy]       sys_sem_destroy,
+[SYS_sem_wait]          sys_sem_wait,
+[SYS_sem_signal]        sys_sem_signal,
 };
 
 void

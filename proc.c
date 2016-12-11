@@ -32,23 +32,21 @@ pinit(void)
 // If found, change state to EMBRYO and initialize
 // state required to run in the kernel.
 // Otherwise return 0.
+// Must hold ptable.lock.
 static struct proc*
 allocproc(void)
 {
   struct proc *p;
   char *sp;
 
-  acquire(&ptable.lock);
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
     if(p->state == UNUSED)
       goto found;
-  release(&ptable.lock);
   return 0;
 
 found:
   p->state = EMBRYO;
   p->pid = nextpid++;
-  release(&ptable.lock);
 
   // Allocate kernel stack.
   if((p->kstack = kalloc()) == 0){
@@ -56,11 +54,11 @@ found:
     return 0;
   }
   sp = p->kstack + KSTACKSIZE;
-  
+
   // Leave room for trap frame.
   sp -= sizeof *p->tf;
   p->tf = (struct trapframe*)sp;
-  
+
   // Set up new context to start executing at forkret,
   // which returns to trapret.
   sp -= 4;
@@ -70,13 +68,12 @@ found:
   p->context = (struct context*)sp;
   memset(p->context, 0, sizeof *p->context);
   p->context->eip = (uint)forkret;
-
   p->handlers[SIGKILL] = (sighandler_t) -1;
   p->handlers[SIGFPE] = (sighandler_t) -1;
   p->handlers[SIGSEGV] = (sighandler_t) -1;
   p->cow = 0;
   p->restorer_addr = -1;
-
+  p->athread = 0;
   return p;
 }
 
@@ -87,7 +84,9 @@ userinit(void)
 {
   struct proc *p;
   extern char _binary_initcode_start[], _binary_initcode_size[];
-  
+
+  acquire(&ptable.lock);
+
   p = allocproc();
   initproc = p;
   if((p->pgdir = setupkvm()) == 0)
@@ -107,6 +106,8 @@ userinit(void)
   p->cwd = namei("/");
 
   p->state = RUNNABLE;
+
+  release(&ptable.lock);
 }
 
 // Grow current process's memory by n bytes.
@@ -115,7 +116,7 @@ int
 growproc(int n)
 {
   uint sz;
-  
+
   sz = proc->sz;
   if(n > 0){
     if((sz = allocuvm(proc->pgdir, sz, sz + n)) == 0)
@@ -138,15 +139,20 @@ fork(void)
   int i, pid;
   struct proc *np;
 
+  acquire(&ptable.lock);
+
   // Allocate process.
-  if((np = allocproc()) == 0)
+  if((np = allocproc()) == 0){
+    release(&ptable.lock);
     return -1;
+  }
 
   // Copy process state from p.
   if((np->pgdir = copyuvm(proc->pgdir, proc->sz)) == 0){
     kfree(np->kstack);
     np->kstack = 0;
     np->state = UNUSED;
+    release(&ptable.lock);
     return -1;
   }
   np->sz = proc->sz;
@@ -162,14 +168,13 @@ fork(void)
   np->cwd = idup(proc->cwd);
 
   safestrcpy(np->name, proc->name, sizeof(proc->name));
- 
+
   pid = np->pid;
 
-  // lock to force the compiler to emit the np->state write last.
-  acquire(&ptable.lock);
   np->state = RUNNABLE;
+
   release(&ptable.lock);
-  
+
   return pid;
 }
 
@@ -240,11 +245,11 @@ wait(void)
         kfree(p->kstack);
         p->kstack = 0;
         freevm(p->pgdir);
-        p->state = UNUSED;
         p->pid = 0;
         p->parent = 0;
         p->name[0] = 0;
         p->killed = 0;
+        p->state = UNUSED;
         release(&ptable.lock);
         return pid;
       }
@@ -290,7 +295,7 @@ scheduler(void)
       proc = p;
       switchuvm(p);
       p->state = RUNNING;
-      swtch(&cpu->scheduler, proc->context);
+      swtch(&cpu->scheduler, p->context);
       switchkvm();
 
       // Process is done running for now.
@@ -303,7 +308,12 @@ scheduler(void)
 }
 
 // Enter scheduler.  Must hold only ptable.lock
-// and have changed proc->state.
+// and have changed proc->state. Saves and restores
+// intena because intena is a property of this
+// kernel thread, not this CPU. It should
+// be proc->intena and proc->ncli, but that would
+// break in the few places where a lock is held but
+// there's no process.
 void
 sched(void)
 {
@@ -343,12 +353,13 @@ forkret(void)
 
   if (first) {
     // Some initialization functions must be run in the context
-    // of a regular process (e.g., they call sleep), and thus cannot 
+    // of a regular process (e.g., they call sleep), and thus cannot
     // be run from main().
     first = 0;
-    initlog();
+    iinit(ROOTDEV);
+    initlog(ROOTDEV);
   }
-  
+
   // Return to "caller", actually trapret (see allocproc).
 }
 
@@ -453,7 +464,7 @@ procdump(void)
   struct proc *p;
   char *state;
   uint pc[10];
-  
+
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
     if(p->state == UNUSED)
       continue;
@@ -577,3 +588,116 @@ int cowfork(void)
 }
 
    
+void thread_init(struct proc* np, void* stack) {
+    np->athread = 1; // mark as a thread
+    np->tstack = stack; // save the stack address
+    np->pgdir = proc->pgdir; // share address space
+    np->sz = proc->sz; // same program size
+    np->parent = proc;
+    np->killed = 0;
+    //np->ofile = proc->ofile; // NOTE: share same files, unable to share files (PANIC!)
+    //np->cwd = proc->cwd; // NOTE: share cwd, unable to share cwd (PANIC!)
+    safestrcpy(proc->name, np->name, sizeof(np->name));
+}
+
+// creates a new thread that lives in the same address space
+// as the parent process
+int
+clone(void *(*func) (void *), void *arg, void *stack){
+    struct proc* np = 0;
+    // stack check
+    acquire(&ptable.lock);
+    if((np = allocproc())== 0 ){
+        return -1; /* cannot allocate a new process */
+    }
+    // initialize the user thread
+    thread_init(np, stack);
+
+    // initialize the trap frame
+    *np->tf = *proc->tf; 
+
+    int i;
+    for(i = 0; i < NOFILE; i++)
+        if(proc->ofile[i])
+          np->ofile[i] = filedup(proc->ofile[i]);
+    np->cwd = idup(proc->cwd);
+
+
+    // Set up the user thread's stack
+    np->tf->esp = ((uint) stack) + PGSIZE - 8;
+    ((uint*) np->tf->esp)[0] = 0x00000000; /* return address */
+    ((uint*) np->tf->esp)[1] = (uint) arg; /* set up arg for func */
+    np->tf->eip = (uint) func; /* thread starts at func */
+
+    // Allow the user thread to run
+    np->state = RUNNABLE;
+    release(&ptable.lock);
+    return np->pid;
+}
+
+// waits for a particular child thread to finishes its execution
+int
+join(int pid, void **stack, void **retval){
+    struct proc* child;
+    int hasChild = 0;
+    acquire(&ptable.lock);
+    for (child = &ptable.proc[0]; child < &ptable.proc[NPROC]; child++) {
+        if (child->parent == proc && child->pid == pid){
+            hasChild = 1;
+            break;
+        }
+    }
+    if (hasChild == 0){ /* error: no child with pid is found */
+        release(&ptable.lock);
+        return -1;
+    }
+    while(child->state != ZOMBIE) {
+        sleep((void*)pid, &ptable.lock);
+    }
+
+    *retval = child->tretval;
+    *stack = child->tstack;
+    // Funeral here, cough, clean up here
+    child->athread = 0;
+    child->tretval = 0;
+    child->tstack = 0;
+    child->sz = 0;
+    child->pgdir = 0;
+    kfree(child->kstack);
+    child->kstack = 0;
+    child->state = UNUSED;
+    child->parent = 0;
+    child->killed = 0;
+    // child->ofile = 0;
+    // child->cwd = 0;
+    child->name[0] = 0;
+    release(&ptable.lock);
+    return 0;
+}
+
+// finishes the execution and allows the parent process/thread to collect
+// the returned value
+void
+texit(void *retval){
+    if(proc->athread == 0){ // do not allow a normal process to texit()
+        return ;
+    }
+    proc->tretval = retval;
+    acquire(&ptable.lock);
+    wakeup1((void*)proc->pid);
+    // Pass abandoned children of this thread to init.
+    struct proc* p;
+    for( p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+        if(p->parent == proc){
+            p->parent = initproc;
+            if(p->state == ZOMBIE){
+                wakeup1(initproc);
+            }
+        }
+    }
+
+    // Jump into the scheduler, never to return.
+    proc->state = ZOMBIE;
+    sched();
+    panic("zombie attacks!");
+}
