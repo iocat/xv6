@@ -14,8 +14,7 @@ int main(void)
     printf(1,"Please wait! %d.....\n");
     t1 = uptime();
     t2 = 0;
-    for(i = 0; i < NUM_FORKS; i++)
-    {
+    for(i = 0; i < NUM_FORKS; i++){
         t1 = uptime();
         if(fork() == 0)
         {
@@ -27,15 +26,14 @@ int main(void)
            wait();
         }
     }
-    printf(1, "Total uptime for %d forks is %d, average is %d...\n", NUM_FORKS, t2, t2 / 500);
+    printf(1, "Total uptime for %d forks is %d, average is %d...\n", NUM_FORKS, t2, t2 / NUM_FORKS);
 
     printf(1,"Please wait some more!%d.....\n");
     t1 = uptime();
     t2 = 0;
-    for(i = 0; i < NUM_FORKS; i++)
-    {
+    for(i = 0; i < NUM_FORKS; i++){
         t1 = uptime();
-        if(cowfork() == 0)
+        if((cowfork()) == 0)
         {
             exit();
         }
@@ -45,7 +43,7 @@ int main(void)
           wait();
         }
     }
-    printf(1, "Total uptime for %d cowforks is %d, average is %d...\n", NUM_FORKS, t2, t2 / 500);
+    printf(1, "Total uptime for %d cowforks is %d, average is %d...\n", NUM_FORKS, t2, t2 / NUM_FORKS);
 
     exit();
 }

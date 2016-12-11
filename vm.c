@@ -6,6 +6,7 @@
 #include "mmu.h"
 #include "proc.h"
 #include "elf.h"
+#include "mprotect.h"
 
 extern char data[];  // defined by kernel.ld
 pde_t *kpgdir;  // for use in scheduler()
@@ -42,7 +43,7 @@ seginit(void)
 // Return the address of the PTE in page table pgdir
 // that corresponds to virtual address va.  If alloc!=0,
 // create any required page table pages.
-pte_t *
+static pte_t *
 walkpgdir(pde_t *pgdir, const void *va, int alloc)
 {
   pde_t *pde;
@@ -68,7 +69,7 @@ walkpgdir(pde_t *pgdir, const void *va, int alloc)
 // physical addresses starting at pa. va and size might not
 // be page-aligned.
 static int
-mappages(pde_t *pgdir, void *va, uint size, uint pa, int perm)
+mappages(pde_t *pgdir, void *va, uint size, uint pa, int perm, int remapallow)
 {
   char *a, *last;
   pte_t *pte;
@@ -78,8 +79,11 @@ mappages(pde_t *pgdir, void *va, uint size, uint pa, int perm)
   for(;;){
     if((pte = walkpgdir(pgdir, a, 1)) == 0)
       return -1;
-    if(*pte & PTE_P)
-      panic("remap");
+    if(!remapallow && (*pte & PTE_P)){
+        panic("remap not allowed");
+    }else if(remapallow && !(*pte & PTE_P)){
+        panic("remap the page that is not mapped before");
+    }
     *pte = pa | perm | PTE_P;
     if(a == last)
       break;
@@ -138,7 +142,7 @@ setupkvm(void)
     panic("PHYSTOP too high");
   for(k = kmap; k < &kmap[NELEM(kmap)]; k++)
     if(mappages(pgdir, k->virt, k->phys_end - k->phys_start, 
-                (uint)k->phys_start, k->perm) < 0)
+                (uint)k->phys_start, k->perm, 0) < 0)
       return 0;
   return pgdir;
 }
@@ -187,7 +191,7 @@ inituvm(pde_t *pgdir, char *init, uint sz)
     panic("inituvm: more than a page");
   mem = kalloc();
   memset(mem, 0, PGSIZE);
-  mappages(pgdir, 0, PGSIZE, v2p(mem), PTE_W|PTE_U);
+  mappages(pgdir, 0, PGSIZE, v2p(mem), PTE_W|PTE_U, 0);
   memmove(mem, init, sz);
 }
 
@@ -237,7 +241,7 @@ allocuvm(pde_t *pgdir, uint oldsz, uint newsz)
       return 0;
     }
     memset(mem, 0, PGSIZE);
-    mappages(pgdir, (char*)a, PGSIZE, v2p(mem), PTE_W|PTE_U);
+    mappages(pgdir, (char*)a, PGSIZE, v2p(mem), PTE_W|PTE_U, 0);
   }
   return newsz;
 }
@@ -304,6 +308,56 @@ clearpteu(pde_t *pgdir, char *uva)
   *pte &= ~PTE_U;
 }
 
+static uint 
+prot_from_pte(pte_t pte){
+    uint prot = PROT_NONE;
+    if(pte&PTE_U){
+        prot |= PROT_READ;
+    }
+    if(pte & PTE_W){
+        prot |= PROT_WRITE;
+    }
+    return prot;
+}
+
+static pte_t
+pte_from_prot(pte_t pte, int prot){
+    pte &= ~(PTE_U | PTE_W);
+    if(prot & PROT_READ){
+        pte |= PTE_U;
+    }
+    if(prot & PROT_WRITE){
+        pte |= PTE_W;
+    }
+    return pte;
+}
+
+// Apply the protection on the page corresponding to the given address
+// returns -1 if protection cannot be set. (could be violation) 
+int 
+applyprot(pde_t *pgdir, char *uva, int prot){
+    pte_t* pte = walkpgdir(pgdir, uva, 0);
+    if(pte==0){
+        return -1;
+    }
+    if((prot & PROT_WRITE) && (int) uva > KERNBASE){
+        return -1;
+    }
+    *pte = pte_from_prot(*pte, prot);
+    lcr3(v2p(pgdir)); // change permission so flush TLB
+    return 0;
+}
+
+// gets the protection level from the address
+int 
+getprot(pde_t *pgdir, char* uva){
+    pte_t* pte = walkpgdir(pgdir, uva, 0);
+    if (pte == 0){
+        return -1;
+    }
+    return prot_from_pte(*pte);
+}
+
 // Given a parent process's page table, create a copy
 // of it for a child.
 pde_t*
@@ -326,7 +380,7 @@ copyuvm(pde_t *pgdir, uint sz)
     if((mem = kalloc()) == 0)
       goto bad;
     memmove(mem, (char*)p2v(pa), PGSIZE);
-    if(mappages(d, (void*)i, PGSIZE, v2p(mem), flags) < 0)
+    if(mappages(d, (void*)i, PGSIZE, v2p(mem), flags, 0) < 0)
       goto bad;
   }
   return d;
@@ -335,6 +389,70 @@ bad:
   freevm(d);
   return 0;
 }
+
+pde_t*
+cow_copyuvm(pde_t *pgdir, uint sz)
+{
+  pde_t *d;
+  pte_t *pte;
+  uint pa, i, flags;
+
+  if((d = setupkvm()) == 0)
+    return 0;
+  for(i = 0; i < sz; i += PGSIZE){
+    if((pte = walkpgdir(pgdir, (void *) i, 0)) == 0)
+      panic("copyuvm: pte should exist");
+    if(!(*pte & PTE_P))
+      panic("copyuvm: page not present");
+    pa = PTE_ADDR(*pte);
+    *pte  &= ~PTE_W ; // set the original flags read-only
+    flags = PTE_FLAGS(*pte);
+    kreuse((char*) p2v(pa)); // reuse the page
+    // map the new entry to the same physical address
+    if(mappages(d, (void*)i, PGSIZE, pa, flags, 0) < 0)
+      goto bad;
+  }
+  lcr3(v2p(pgdir)); // change permission so flush TLB
+  return d;
+bad:
+  freevm(d);
+  return 0;
+}
+
+// copy the page containing the given virtual address
+// to a new writable area and free the original page
+// 
+// returns 0 on success and non-zero for error
+int
+cow_copyfreepg(pde_t *pgdir, char* uva){
+    char* mem; // new allocated memory
+    pte_t* pte; // pte corresponding to uva
+    uint pa, flags; // physical address of uva's page
+
+    pte = walkpgdir(pgdir, uva, 0);
+    if (pte == 0){
+        panic("cow_copyfreepg: pte should exist");
+    }
+    if(!(*pte & PTE_P)){
+        panic("cow_copyfreepg: page is not presented");
+    }
+    if((mem = kalloc()) == 0){
+        panic("cow_copyfreepg: not enough free memory");
+    }
+    pa = PTE_ADDR(*pte);
+    memmove(mem, p2v(pa), PGSIZE);
+    flags = PTE_FLAGS(*pte);
+    flags |= PTE_W; // set as writable
+    // remap uva to the new page
+    if(mappages(pgdir, (void*) PTE_ADDR(uva) , PGSIZE, v2p(mem), flags, 1) < 0)
+        goto bad;
+    kfree((char*)p2v(pa)); // free the memory
+    lcr3(v2p(pgdir)); // change permission so flush TLB
+    return 0;
+bad:
+    kfree(mem);
+    return -1;
+}   
 
 //PAGEBREAK!
 // Map user virtual address to kernel address.

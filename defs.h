@@ -67,7 +67,7 @@ char*           kalloc(void);
 void            kfree(char*);
 void            kinit1(void*, void*);
 void            kinit2(void*, void*);
-void            reuse(char*);
+void            kreuse(char*);
 
 // kbd.c
 void            kbdintr(void);
@@ -181,7 +181,10 @@ void            switchuvm(struct proc*);
 void            switchkvm(void);
 int             copyout(pde_t*, uint, void*, uint);
 void            clearpteu(pde_t *pgdir, char *uva);
-pte_t*          walkpgdir(pde_t*, const void*, int);
+int             applyprot(pde_t*, char* uva, int prot);
+int             getprot(pde_t*, char* uva);
+pde_t*          cow_copyuvm(pde_t*, uint);
+int             cow_copyfreepg(pde_t *, char*);
 
 // number of elements in fixed-size array
 #define NELEM(x) (sizeof(x)/sizeof((x)[0]))

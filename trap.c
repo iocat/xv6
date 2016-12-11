@@ -83,7 +83,15 @@ trap(struct trapframe *tf)
     }
     break;
   case T_PGFLT:
-    if (proc->handlers[SIGSEGV] != (sighandler_t) -1){
+    if(proc->cow){
+        int badcow = 0;
+        badcow = cow_on(); // trigger copy on write
+        if(badcow && proc->handlers[SIGSEGV] != (sighandler_t) -1){
+            signal_deliver(SIGSEGV);
+        }
+        break;
+    }
+    if(proc->handlers[SIGSEGV] != (sighandler_t) -1){
       signal_deliver(SIGSEGV);
     }
     break;

@@ -74,6 +74,7 @@ found:
   p->handlers[SIGKILL] = (sighandler_t) -1;
   p->handlers[SIGFPE] = (sighandler_t) -1;
   p->handlers[SIGSEGV] = (sighandler_t) -1;
+  p->cow = 0;
   p->restorer_addr = -1;
 
   return p;
@@ -470,38 +471,13 @@ procdump(void)
   }
 }
 
-// gets the protection from page table entry
-uint prot_from_pte(pte_t pte){
-    uint prot = PROT_NONE; 
-    if (pte & PTE_U) {
-        prot |= PROT_READ;
-    }
-    if (pte & PTE_W){
-        prot |= PROT_WRITE;
-    }
-    return prot;
-}
-
-// get the page table entry from the protection
-pte_t pte_from_prot(pte_t pte, int prot) {
-    pte &= ~(PTE_U | PTE_W);
-    if (prot & PROT_READ) {
-        pte |= PTE_U;
-    }
-    if( prot & PROT_WRITE){
-        pte |= PTE_W;
-    }
-    return pte;   
-}
-
 void signal_deliver(int signum)
 {
     siginfo_t info;
     switch (signum){
     case SIGSEGV:
         info.addr = rcr2();
-        pte_t* pte = walkpgdir(proc->pgdir,(void*) info.addr, 0);
-        info.type = prot_from_pte(*pte);
+        info.type = getprot(proc->pgdir,(char*) info.addr);
         break;
     }
 	uint old_eip = proc->tf->eip;
@@ -531,67 +507,73 @@ int mprotect(void *addr, int len, int prot)
     if( (int) addr % PGSIZE != 0){
         return -1; // cannot protect non page-aligned address
     }
-    int i = 0;
-    int counter = len / PGSIZE;
-    do{
-        // find pte, allocate if not exists
-        pte_t* pte = walkpgdir(proc->pgdir,(void*)( (int) addr + i*PGSIZE), 1);
-        *pte = pte_from_prot(*pte, prot);
-        i++;
-    }while(i < counter);
-
+    int i = (int) addr;
+    for( ; i < (int) addr + len; i += PGSIZE){
+        int bad = applyprot(proc->pgdir, (char*)i, prot);
+        if(bad){
+            return -1;
+        } 
+    }
     return 0;
 }
 
-static void 
-cow_on_copy_page(int signum, siginfo_t info){
-
+// triggers a copy page event
+// only calls when a page fault occurs
+// returns 0 or non-zero for error
+int
+cow_on(){
+    uint addr = rcr2();
+    if (addr > KERNBASE){
+        cprintf("cannot write to kernel's region");
+        return -1; // attempt to write to kernel space
+    }
+    // copy and free the page
+    return cow_copyfreepg(proc->pgdir, (char*) addr );
 }
 
 // fork with copy on write pages
 int cowfork(void)
 {
-    // TODO: implement cow fork
-  int i, pid;
-  struct proc *np;
+    int i, pid;
+    struct proc *np;
 
-  // Allocate process.
-  if((np = allocproc()) == 0)
-    return -1;
-  //
-  // Copy process state from p.
-  if((np->pgdir = copyuvm(proc->pgdir, proc->sz)) == 0){
-    kfree(np->kstack);
-    np->kstack = 0;
-    np->state = UNUSED;
-    return -1;
-  }
-  // copy on write handler
-  np->handlers[SIGSEGV] = cow_on_copy_page;
-  proc->handlers[SIGSEGV] = cow_on_copy_page;
+    // Allocate process.
+    if((np = allocproc()) == 0){
+        return -1;
+    }
+    // Copy process state from p.
+    if((np->pgdir = cow_copyuvm(proc->pgdir, proc->sz)) == 0){
+        kfree(np->kstack);
+        np->kstack = 0;
+        np->state = UNUSED;
+        return -1;
+    }
+    // set the two processes as cow
+    proc->cow = 1;
+    np->cow = 1;
   
-  np->sz = proc->sz;
-  np->parent = proc;
-  *np->tf = *proc->tf;
+    np->sz = proc->sz;
+    np->parent = proc;
+    *np->tf = *proc->tf;
 
-  // Clear %eax so that fork returns 0 in the child.
-  np->tf->eax = 0;
+    // Clear %eax so that fork returns 0 in the child.
+    np->tf->eax = 0;
 
-  for(i = 0; i < NOFILE; i++)
-    if(proc->ofile[i])
-      np->ofile[i] = filedup(proc->ofile[i]);
-  np->cwd = idup(proc->cwd);
+    for(i = 0; i < NOFILE; i++)
+        if(proc->ofile[i])
+            np->ofile[i] = filedup(proc->ofile[i]);
+    np->cwd = idup(proc->cwd);
 
-  safestrcpy(np->name, proc->name, sizeof(proc->name));
+    safestrcpy(np->name, proc->name, sizeof(proc->name));
  
-  pid = np->pid;
+    pid = np->pid;
 
-  // lock to force the compiler to emit the np->state write last.
-  acquire(&ptable.lock);
-  np->state = RUNNABLE;
-  release(&ptable.lock);
-  
-  return pid;
+    // lock to force the compiler to emit the np->state write last.
+    acquire(&ptable.lock);
+    np->state = RUNNABLE;
+    release(&ptable.lock);
+
+    return pid;
 }
 
    

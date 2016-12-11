@@ -70,6 +70,7 @@ struct proc {
   char name[16];               // Process name (debugging)
   sighandler_t handlers[3];    // Signal handlers
   uint restorer_addr;          // Signal restorer
+  int cow;                     // If non-zero, is a copy on write process
 };
 
 // Process memory is laid out contiguously, low addresses first:
@@ -80,3 +81,4 @@ struct proc {
 
 void signal_deliver(int signum);
 sighandler_t signal_register_handler(int signum, sighandler_t handler);
+int cow_on();
