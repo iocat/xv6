@@ -86,6 +86,7 @@ kfree(char *v)
         r-> next = kmem.freelist;
         kmem.freelist = r; 
     }else if(count<0){
+        cprintf("ref is %d", count);
         panic("ref count cannot be < 0");
     }
     if(kmem.use_lock)
@@ -95,7 +96,7 @@ kfree(char *v)
 // reuses a page (basically increment the ref count)
 // returns the new ref count
 void
-reuse(char *v){
+kreuse(char *v){
     freepg_range_check(v);
     if(kmem.use_lock)
         acquire(&kmem.lock);
@@ -110,15 +111,15 @@ reuse(char *v){
 char* 
 kalloc(void)
 {
-  struct run *r;
-  if(kmem.use_lock)
-    acquire(&kmem.lock);
-  r = kmem.freelist;
-  if(r){
-    kmem.freelist = r->next;
-    kmem.refs[REFCOUNT_INDEX(r)] = 1;
-  }
-  if(kmem.use_lock)
-    release(&kmem.lock);
-  return (char*)r;
+    struct run *r;
+    if(kmem.use_lock)
+        acquire(&kmem.lock);
+    r = kmem.freelist;
+    if(r){
+        kmem.freelist = r->next;
+        kmem.refs[REFCOUNT_INDEX(r)] = 1;
+    }
+    if(kmem.use_lock)
+        release(&kmem.lock);
+    return (char*)r;
 }
